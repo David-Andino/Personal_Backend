@@ -13,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 // Servir imágenes de empleados desde carpeta pública
-app.use('/imagenesEmpleados', express.static(path.join(__dirname, 'uploads', 'empleados')));
+//app.use('/imagenesEmpleados', express.static(path.join(__dirname, 'uploads', 'empleados')));
 
 // Rutas de la API
 app.use('/api/empleados', empleadosRoutes);
