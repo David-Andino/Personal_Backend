@@ -1,9 +1,8 @@
 const db = require('../config/db');
 const cloudinary = require('cloudinary').v2;
 
-// Configuración adicional de Cloudinary (opcional)
 cloudinary.config({
-  secure: true // Fuerza HTTPS
+  secure: true 
 });
 
 // Función para eliminar imagen anterior si existe
@@ -165,108 +164,135 @@ exports.obtenerEmpleadoPorId = async (req, res) => {
 };
 
 // Actualizar un empleado
+// Actualizar un empleado - Versión corregida
 exports.actualizarEmpleado = async (req, res) => {
-    let transaction;
     try {
-        const { id } = req.params;
-        const campos = req.body;
+        const { id } = req.params; // Obtener el ID de los parámetros de la ruta
+        const campos = req.body;   // Obtener los campos del cuerpo de la solicitud
 
-        // Validaciones básicas
-        if (!campos.nombre || !campos.puesto || !campos.tipo_contrato || 
-            !campos.sueldo_base || !campos.fecha_contratacion || !campos.numero_identidad) {
-            return res.status(400).json({ error: 'Faltan campos obligatorios' });
+        // 1. Validaciones básicas
+        if (!id || !campos.nombre || !campos.puesto) {
+            return res.status(400).json({ 
+                success: false,
+                error: 'Faltan campos obligatorios (ID, nombre o puesto)' 
+            });
         }
 
-        if (campos.activo && campos.activo !== 'SI' && campos.activo !== 'NO') {
-            return res.status(400).json({ error: 'Campo activo inválido' });
-        }
+        // 2. Procesamiento de fechas
+        const procesarFecha = (valor) => {
+            return !valor || valor === 'null' || valor === '' ? null : valor;
+        };
 
-        // Obtener empleado actual para manejo de imagen
+        const fechaEgreso = procesarFecha(campos.fecha_egreso);
+        const fechaNacimiento = procesarFecha(campos.fecha_nacimiento);
+
+        // 3. Obtener empleado actual para manejar la imagen anterior
         const [empleadoActual] = await db.query(
             'SELECT public_id_foto FROM empleados WHERE id = ?', 
             [id]
         );
 
         if (!empleadoActual.length) {
-            return res.status(404).json({ error: 'Empleado no encontrado' });
+            return res.status(404).json({ 
+                success: false,
+                error: 'Empleado no encontrado' 
+            });
         }
 
-        const publicIdAnterior = empleadoActual[0].public_id_foto;
-        const nuevaImagen = req.file ? {
-            url: req.file.path,
-            public_id: req.file.filename
-        } : null;
+        // 4. Procesamiento de imagen
+        let imagenCloudinary = null;
+        if (req.file) {
+            console.log('Imagen subida a Cloudinary:', req.file);
+            
+            // Eliminar imagen anterior si existe
+            if (empleadoActual[0].public_id_foto) {
+                await eliminarImagenAnterior(empleadoActual[0].public_id_foto);
+            }
+            
+            imagenCloudinary = {
+                url: req.file.path,
+                public_id: req.file.filename
+            };
+        }
 
-        // Actualizar datos
-        const [result] = await db.query(
-            `UPDATE empleados 
-            SET nombre = ?, puesto = ?, tipo_contrato = ?, sueldo_base = ?, 
-                activo = COALESCE(?, activo), fecha_contratacion = ?, 
-                numero_identidad = ?, ruta_huella = IFNULL(?, ruta_huella), 
-                ruta_fotografia = IFNULL(?, ruta_fotografia), 
-                public_id_foto = IFNULL(?, public_id_foto),
-                telefono = ?, domicilio = ?, estado_civil = ?, sexo = ?, 
-                fecha_egreso = ?, nivel_educativo = ?, nombre_emergencia = ?, 
-                telefono_emergencia = ?, lugar_nacimiento = ?, fecha_nacimiento = ?, 
-                tipo_contrato_empleo = ?, beneficiarios = ?, nacionalidad = ?
-            WHERE id = ?`,
-            [
-                campos.nombre,
-                campos.puesto,
-                campos.tipo_contrato,
-                campos.sueldo_base,
-                campos.activo,
-                campos.fecha_contratacion,
-                campos.numero_identidad,
-                campos.huella,
-                nuevaImagen?.url,
-                nuevaImagen?.public_id,
-                campos.telefono,
-                campos.domicilio,
-                campos.estado_civil,
-                campos.sexo,
-                campos.fecha_egreso === 'null' ? null : campos.fecha_egreso,
-                campos.nivel_educativo,
-                campos.nombre_emergencia,
-                campos.telefono_emergencia,
-                campos.lugar_nacimiento,
-                campos.fecha_nacimiento,
-                campos.tipo_contrato_empleo,
-                campos.beneficiarios,
-                campos.nacionalidad,
-                id
-            ]
-        );
+        // 5. Consulta SQL con parámetros seguros
+        const query = `
+            UPDATE empleados 
+            SET nombre = ?, puesto = ?, tipo_contrato = ?, sueldo_base = ?,
+                activo = ?, fecha_contratacion = ?, numero_identidad = ?,
+                ruta_fotografia = COALESCE(?, ruta_fotografia),
+                public_id_foto = COALESCE(?, public_id_foto),
+                telefono = ?, domicilio = ?, estado_civil = ?, sexo = ?,
+                fecha_egreso = ?, nivel_educativo = ?, nombre_emergencia = ?,
+                telefono_emergencia = ?, lugar_nacimiento = ?,
+                fecha_nacimiento = ?, tipo_contrato_empleo = ?,
+                beneficiarios = ?, nacionalidad = ?
+            WHERE id = ?
+        `;
+
+        const params = [
+            campos.nombre,
+            campos.puesto,
+            campos.tipo_contrato,
+            campos.sueldo_base,
+            campos.activo,
+            campos.fecha_contratacion,
+            campos.numero_identidad,
+            imagenCloudinary?.url,
+            imagenCloudinary?.public_id,
+            campos.telefono,
+            campos.domicilio,
+            campos.estado_civil,
+            campos.sexo,
+            fechaEgreso,
+            campos.nivel_educativo,
+            campos.nombre_emergencia,
+            campos.telefono_emergencia,
+            campos.lugar_nacimiento,
+            fechaNacimiento,
+            campos.tipo_contrato_empleo,
+            campos.beneficiarios || null,
+            campos.nacionalidad,
+            id
+        ];
+
+        console.log('Ejecutando consulta:', query, params);
+        const [result] = await db.query(query, params);
 
         if (result.affectedRows === 0) {
-            throw new Error('No se actualizó ningún registro');
+            return res.status(404).json({ 
+                success: false,
+                error: 'No se actualizó ningún registro' 
+            });
         }
 
-        // Eliminar imagen anterior si se subió una nueva
-        if (nuevaImagen && publicIdAnterior) {
-            await eliminarImagenAnterior(publicIdAnterior);
-        }
+        // Obtener los datos actualizados
+        const [empleadoActualizado] = await db.query(
+            'SELECT * FROM empleados WHERE id = ?', 
+            [id]
+        );
 
         res.json({ 
             success: true,
-            message: 'Empleado actualizado',
-            foto: nuevaImagen?.url || null
+            message: 'Empleado actualizado correctamente',
+            data: empleadoActualizado[0]
         });
 
     } catch (err) {
-        // Si falló, eliminar la nueva imagen subida
+        // Si hubo error y se subió imagen, eliminarla
         if (req.file?.filename) {
             await eliminarImagenAnterior(req.file.filename);
         }
 
-        console.error('Error al actualizar empleado:', err);
+        console.error('Error al actualizar empleado:', {
+            message: err.message,
+            stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+            body: req.body
+        });
         
-        if (err.code === 'ER_TRUNCATED_WRONG_VALUE_FOR_FIELD') {
-            return res.status(400).json({ error: 'Valor inválido para campo activo' });
-        }
-
         res.status(500).json({ 
-            error: 'Error al actualizar empleado',
+            success: false,
+            error: 'Error interno al actualizar empleado',
             details: process.env.NODE_ENV === 'development' ? err.message : null
         });
     }
