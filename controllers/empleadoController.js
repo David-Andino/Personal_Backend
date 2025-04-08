@@ -132,7 +132,7 @@ exports.obtenerEmpleados = async (req, res) => {
     try {
         const [empleados] = await db.query(`
             SELECT id, nombre, puesto, tipo_contrato, sueldo_base, activo, 
-                   fecha_contratacion, numero_identidad as foto, telefono
+                   fecha_contratacion, numero_identidad
             FROM empleados
         `);
         res.json(empleados);
