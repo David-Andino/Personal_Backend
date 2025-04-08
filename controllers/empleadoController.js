@@ -163,30 +163,38 @@ exports.obtenerEmpleadoPorId = async (req, res) => {
     }
 };
 
-// Actualizar un empleado
-// Actualizar un empleado - Versión corregida
+
 exports.actualizarEmpleado = async (req, res) => {
     try {
-        const { id } = req.params; // Obtener el ID de los parámetros de la ruta
-        const campos = req.body;   // Obtener los campos del cuerpo de la solicitud
-
-        // 1. Validaciones básicas
-        if (!id || !campos.nombre || !campos.puesto) {
+        const { id } = req.params;
+        
+        // 1. Validación básica de ID
+        if (!id || isNaN(id)) {
             return res.status(400).json({ 
                 success: false,
-                error: 'Faltan campos obligatorios (ID, nombre o puesto)' 
+                error: 'ID de empleado no válido' 
             });
         }
 
-        // 2. Procesamiento de fechas
-        const procesarFecha = (valor) => {
-            return !valor || valor === 'null' || valor === '' ? null : valor;
+        // 2. Validar campos obligatorios
+        const camposObligatorios = ['nombre', 'puesto', 'tipo_contrato', 'sueldo_base', 'activo'];
+        const faltantes = camposObligatorios.filter(campo => !req.body[campo]);
+        
+        if (faltantes.length > 0) {
+            return res.status(400).json({ 
+                success: false,
+                error: `Faltan campos obligatorios: ${faltantes.join(', ')}`,
+                receivedData: req.body // Para depuración
+            });
+        }
+
+        // 3. Procesamiento de datos
+        const procesarValor = (valor) => {
+            if (valor === 'null' || valor === '' || valor === 'undefined') return null;
+            return valor;
         };
 
-        const fechaEgreso = procesarFecha(campos.fecha_egreso);
-        const fechaNacimiento = procesarFecha(campos.fecha_nacimiento);
-
-        // 3. Obtener empleado actual para manejar la imagen anterior
+        // 4. Obtener empleado actual
         const [empleadoActual] = await db.query(
             'SELECT public_id_foto FROM empleados WHERE id = ?', 
             [id]
@@ -199,64 +207,73 @@ exports.actualizarEmpleado = async (req, res) => {
             });
         }
 
-        // 4. Procesamiento de imagen
+        // 5. Procesamiento de imagen
         let imagenCloudinary = null;
         if (req.file) {
-            console.log('Imagen subida a Cloudinary:', req.file);
-            
-            // Eliminar imagen anterior si existe
-            if (empleadoActual[0].public_id_foto) {
-                await eliminarImagenAnterior(empleadoActual[0].public_id_foto);
+            try {
+                // Eliminar imagen anterior si existe
+                if (empleadoActual[0].public_id_foto) {
+                    await eliminarImagenAnterior(empleadoActual[0].public_id_foto);
+                }
+                
+                imagenCloudinary = {
+                    url: req.file.path,
+                    public_id: req.file.filename
+                };
+            } catch (error) {
+                console.error('Error procesando imagen:', error);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Error al procesar la imagen'
+                });
             }
-            
-            imagenCloudinary = {
-                url: req.file.path,
-                public_id: req.file.filename
-            };
         }
 
-        // 5. Consulta SQL con parámetros seguros
-        const query = `
-            UPDATE empleados 
-            SET nombre = ?, puesto = ?, tipo_contrato = ?, sueldo_base = ?,
-                activo = ?, fecha_contratacion = ?, numero_identidad = ?,
-                ruta_fotografia = COALESCE(?, ruta_fotografia),
-                public_id_foto = COALESCE(?, public_id_foto),
-                telefono = ?, domicilio = ?, estado_civil = ?, sexo = ?,
-                fecha_egreso = ?, nivel_educativo = ?, nombre_emergencia = ?,
-                telefono_emergencia = ?, lugar_nacimiento = ?,
-                fecha_nacimiento = ?, tipo_contrato_empleo = ?,
-                beneficiarios = ?, nacionalidad = ?
-            WHERE id = ?
-        `;
+        // 6. Construir consulta dinámica
+        const camposActualizar = {
+            nombre: req.body.nombre,
+            puesto: req.body.puesto,
+            tipo_contrato: req.body.tipo_contrato,
+            sueldo_base: req.body.sueldo_base,
+            activo: req.body.activo,
+            fecha_contratacion: req.body.fecha_contratacion,
+            numero_identidad: req.body.numero_identidad,
+            telefono: req.body.telefono,
+            domicilio: req.body.domicilio,
+            estado_civil: req.body.estado_civil,
+            sexo: req.body.sexo,
+            fecha_egreso: procesarValor(req.body.fecha_egreso),
+            nivel_educativo: req.body.nivel_educativo,
+            nombre_emergencia: req.body.nombre_emergencia,
+            telefono_emergencia: req.body.telefono_emergencia,
+            lugar_nacimiento: req.body.lugar_nacimiento,
+            fecha_nacimiento: req.body.fecha_nacimiento,
+            tipo_contrato_empleo: req.body.tipo_contrato_empleo,
+            beneficiarios: procesarValor(req.body.beneficiarios),
+            nacionalidad: req.body.nacionalidad
+        };
 
-        const params = [
-            campos.nombre,
-            campos.puesto,
-            campos.tipo_contrato,
-            campos.sueldo_base,
-            campos.activo,
-            campos.fecha_contratacion,
-            campos.numero_identidad,
-            imagenCloudinary?.url,
-            imagenCloudinary?.public_id,
-            campos.telefono,
-            campos.domicilio,
-            campos.estado_civil,
-            campos.sexo,
-            fechaEgreso,
-            campos.nivel_educativo,
-            campos.nombre_emergencia,
-            campos.telefono_emergencia,
-            campos.lugar_nacimiento,
-            fechaNacimiento,
-            campos.tipo_contrato_empleo,
-            campos.beneficiarios || null,
-            campos.nacionalidad,
-            id
-        ];
+        if (imagenCloudinary) {
+            camposActualizar.ruta_fotografia = imagenCloudinary.url;
+            camposActualizar.public_id_foto = imagenCloudinary.public_id;
+        }
 
-        console.log('Ejecutando consulta:', query, params);
+        // 7. Construir consulta SQL dinámica
+        let setClause = [];
+        let params = [];
+        
+        Object.entries(camposActualizar).forEach(([key, value]) => {
+            if (value !== undefined) {
+                setClause.push(`${key} = ?`);
+                params.push(value);
+            }
+        });
+
+        params.push(id);
+
+        const query = `UPDATE empleados SET ${setClause.join(', ')} WHERE id = ?`;
+        
+        // 8. Ejecutar consulta
         const [result] = await db.query(query, params);
 
         if (result.affectedRows === 0) {
@@ -266,7 +283,7 @@ exports.actualizarEmpleado = async (req, res) => {
             });
         }
 
-        // Obtener los datos actualizados
+        // 9. Obtener datos actualizados
         const [empleadoActualizado] = await db.query(
             'SELECT * FROM empleados WHERE id = ?', 
             [id]
@@ -279,15 +296,17 @@ exports.actualizarEmpleado = async (req, res) => {
         });
 
     } catch (err) {
-        // Si hubo error y se subió imagen, eliminarla
+        // Eliminar imagen si hubo error
         if (req.file?.filename) {
             await eliminarImagenAnterior(req.file.filename);
         }
 
-        console.error('Error al actualizar empleado:', {
+        console.error('Error detallado:', {
             message: err.message,
-            stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-            body: req.body
+            stack: err.stack,
+            body: req.body,
+            params: req.params,
+            file: req.file
         });
         
         res.status(500).json({ 
@@ -297,7 +316,6 @@ exports.actualizarEmpleado = async (req, res) => {
         });
     }
 };
-
 // Eliminar un empleado
 exports.eliminarEmpleado = async (req, res) => {
     try {
