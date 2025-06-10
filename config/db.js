@@ -1,20 +1,20 @@
-require('dotenv').config(); // Solo necesario en desarrollo
-const mysql = require('mysql2/promise'); // Usamos la versión con promesas
+require('dotenv').config();
+const mysql = require('mysql2/promise'); 
 
-// Configuración para Railway (producción) o desarrollo local
+
 const dbConfig = {
-  host: process.env.MYSQLHOST || process.env.DB_HOST || 'localhost',
-  port: process.env.MYSQLPORT || process.env.DB_PORT || 3306,
-  user: process.env.MYSQLUSER || process.env.DB_USER || 'root',
-  password: process.env.MYSQLPASSWORD || process.env.DB_PASSWORD || '',
-  database: process.env.MYSQLDATABASE || process.env.DB_NAME || 'railway',
+  host: process.env.MYSQLHOST || process.env.DB_HOST,
+  port: process.env.MYSQLPORT || process.env.DB_PORT,
+  user: process.env.MYSQLUSER || process.env.DB_USER,
+  password: process.env.MYSQLPASSWORD || process.env.DB_PASSWORD,
+  database: process.env.MYSQLDATABASE || process.env.DB_NAME,
   ssl: process.env.NODE_ENV === 'production' ? { 
-    rejectUnauthorized: false // Obligatorio para Railway
+    rejectUnauthorized: false
   } : null,
   waitForConnections: true,
-  connectionLimit: 10, // Número óptimo para la mayoría de aplicaciones
+  connectionLimit: 10,
   queueLimit: 0,
-  connectTimeout: 10000 // 10 segundos de timeout
+  connectTimeout: 10000
 };
 
 // Crea el pool de conexiones
@@ -37,9 +37,9 @@ const pool = mysql.createPool(dbConfig);
         database: dbConfig.database
       }
     });
-    // En producción, podrías querer reintentar o terminar el proceso
+    
     if (process.env.NODE_ENV === 'production') {
-      process.exit(1); // Termina la aplicación si no hay conexión en producción
+      process.exit(1);
     }
   }
 })();
